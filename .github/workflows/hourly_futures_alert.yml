@@ -1,0 +1,31 @@
+name: Taiwan Micro Futures Hourly Cloud Alert
+
+on:
+  schedule:
+    # Runs every hour from 00:00 to 14:00 UTC (08:00 to 22:00 Taiwan Time, Monday to Friday)
+    - cron: '0 0-14 * * 1-5'
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  run-hourly-alert:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install yfinance pandas numpy requests
+
+    - name: Execute Hourly Quant Alert Dispatcher
+      env:
+        BARK_KEY: ${{ secrets.BARK_KEY || '55QijEor5EwHqVqd6Cg9jJ' }}
+      run: |
+        python scripts/cloud_hourly_alert.py
