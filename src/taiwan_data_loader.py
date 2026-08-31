@@ -2,8 +2,12 @@ import os
 import requests
 import pandas as pd
 import numpy as np
-import yfinance as yf
 from datetime import datetime
+
+try:
+    import yfinance as yf
+except Exception:
+    yf = None
 
 def get_realtime_taifex_futures_price():
     """
@@ -28,7 +32,6 @@ def get_realtime_taifex_futures_price():
                 data = resp.json()
                 quotes = data.get("RtData", {}).get("QuoteList", [])
                 for q in quotes:
-                    # Find near-month contract with valid price (e.g. TMFI6-M, TMFI6-F)
                     last_p_str = q.get("CLastPrice", "").strip()
                     sym_id = q.get("SymbolID", "")
                     if last_p_str and ("TMF" in sym_id) and ("-" in sym_id) and not sym_id.endswith("-P") and not sym_id.endswith("-S"):
@@ -50,21 +53,22 @@ def get_realtime_taifex_futures_price():
             continue
             
     # Fallback to TAIEX spot index via yfinance if TAIFEX MIS is in weekend maintenance
-    try:
-        ticker = yf.Ticker("^TWII")
-        live_p = ticker.fast_info.last_price
-        if live_p and not np.isnan(live_p) and live_p > 1000:
-            return {
-                "price": round(float(live_p), 1),
-                "symbol": "^TWII",
-                "name": "台股加權指數",
-                "session": "現貨收盤",
-                "time": datetime.now().strftime("%H%M%S"),
-                "ref_price": 0.0,
-                "source": "Yahoo Finance (現貨指數)"
-            }
-    except Exception:
-        pass
+    if yf is not None:
+        try:
+            ticker = yf.Ticker("^TWII")
+            live_p = ticker.fast_info.last_price
+            if live_p and not np.isnan(live_p) and live_p > 1000:
+                return {
+                    "price": round(float(live_p), 1),
+                    "symbol": "^TWII",
+                    "name": "台股加權指數",
+                    "session": "現貨收盤",
+                    "time": datetime.now().strftime("%H%M%S"),
+                    "ref_price": 0.0,
+                    "source": "Yahoo Finance (現貨指數)"
+                }
+        except Exception:
+            pass
         
     return None
 
@@ -74,67 +78,80 @@ def fetch_and_prepare_taiwan_macro_data(data_path="data/taiwan_macro_data.csv", 
     """
     os.makedirs(os.path.dirname(data_path), exist_ok=True)
     
-    # 1. Taiwan Stock Index (^TWII)
-    df_tw = yf.download("^TWII", start=start_date, progress=False)
-    if isinstance(df_tw.columns, pd.MultiIndex):
-        df_tw.columns = [c[0].lower() for c in df_tw.columns]
-    else:
-        df_tw.columns = [c.lower() for c in df_tw.columns]
-    df_tw.index = pd.to_datetime(df_tw.index).tz_localize(None)
-    df_tw = df_tw[['open', 'high', 'low', 'close', 'volume']].copy()
-    
-    # 2. US Semiconductor Index (^SOX)
-    df_sox = yf.download("^SOX", start=start_date, progress=False)
-    if isinstance(df_sox.columns, pd.MultiIndex):
-        df_sox.columns = [c[0].lower() for c in df_sox.columns]
-    else:
-        df_sox.columns = [c.lower() for c in df_sox.columns]
-    df_sox.index = pd.to_datetime(df_sox.index).tz_localize(None)
-    
-    # 3. US Nasdaq Composite (^IXIC)
-    df_nasdaq = yf.download("^IXIC", start=start_date, progress=False)
-    if isinstance(df_nasdaq.columns, pd.MultiIndex):
-        df_nasdaq.columns = [c[0].lower() for c in df_nasdaq.columns]
-    else:
-        df_nasdaq.columns = [c.lower() for c in df_nasdaq.columns]
-    df_nasdaq.index = pd.to_datetime(df_nasdaq.index).tz_localize(None)
-    
-    # 4. USD/TWD Exchange Rate (USDTWD=X)
-    df_usdtwd = yf.download("USDTWD=X", start=start_date, progress=False)
-    if isinstance(df_usdtwd.columns, pd.MultiIndex):
-        df_usdtwd.columns = [c[0].lower() for c in df_usdtwd.columns]
-    else:
-        df_usdtwd.columns = [c.lower() for c in df_usdtwd.columns]
-    df_usdtwd.index = pd.to_datetime(df_usdtwd.index).tz_localize(None)
-    
-    merged = df_tw.copy()
-    merged.rename(columns={
-        "open": "tw_open",
-        "high": "tw_high",
-        "low": "tw_low",
-        "close": "tw_close",
-        "volume": "tw_volume"
-    }, inplace=True)
-    
-    # Lag US indices by 1 day
-    merged['sox_close_prev'] = df_sox['close'].shift(1).reindex(merged.index, method='ffill')
-    merged['sox_ret_1d'] = df_sox['close'].pct_change(fill_method=None).shift(1).reindex(merged.index, method='ffill')
-    
-    merged['nasdaq_close_prev'] = df_nasdaq['close'].shift(1).reindex(merged.index, method='ffill')
-    merged['nasdaq_ret_1d'] = df_nasdaq['close'].pct_change(fill_method=None).shift(1).reindex(merged.index, method='ffill')
-    
-    merged['usdtwd_close'] = df_usdtwd['close'].reindex(merged.index, method='ffill')
-    merged['usdtwd_ret_5d'] = df_usdtwd['close'].pct_change(5, fill_method=None).reindex(merged.index, method='ffill')
-    
-    merged.dropna(inplace=True)
-    
-    # Update latest tick with live TAIFEX futures quote
-    live_q = get_realtime_taifex_futures_price()
-    if live_q:
-        merged.iloc[-1, merged.columns.get_loc('tw_close')] = live_q['price']
+    if yf is not None:
+        try:
+            # 1. Taiwan Stock Index (^TWII)
+            df_tw = yf.download("^TWII", start=start_date, progress=False)
+            if isinstance(df_tw.columns, pd.MultiIndex):
+                df_tw.columns = [c[0].lower() for c in df_tw.columns]
+            else:
+                df_tw.columns = [c.lower() for c in df_tw.columns]
+            df_tw.index = pd.to_datetime(df_tw.index).tz_localize(None)
+            df_tw = df_tw[['open', 'high', 'low', 'close', 'volume']].copy()
+            
+            # 2. US Semiconductor Index (^SOX)
+            df_sox = yf.download("^SOX", start=start_date, progress=False)
+            if isinstance(df_sox.columns, pd.MultiIndex):
+                df_sox.columns = [c[0].lower() for c in df_sox.columns]
+            else:
+                df_sox.columns = [c.lower() for c in df_sox.columns]
+            df_sox.index = pd.to_datetime(df_sox.index).tz_localize(None)
+            
+            # 3. US Nasdaq Composite (^IXIC)
+            df_nasdaq = yf.download("^IXIC", start=start_date, progress=False)
+            if isinstance(df_nasdaq.columns, pd.MultiIndex):
+                df_nasdaq.columns = [c[0].lower() for c in df_nasdaq.columns]
+            else:
+                df_nasdaq.columns = [c.lower() for c in df_nasdaq.columns]
+            df_nasdaq.index = pd.to_datetime(df_nasdaq.index).tz_localize(None)
+            
+            # 4. USD/TWD Exchange Rate (USDTWD=X)
+            df_usdtwd = yf.download("USDTWD=X", start=start_date, progress=False)
+            if isinstance(df_usdtwd.columns, pd.MultiIndex):
+                df_usdtwd.columns = [c[0].lower() for c in df_usdtwd.columns]
+            else:
+                df_usdtwd.columns = [c.lower() for c in df_usdtwd.columns]
+            df_usdtwd.index = pd.to_datetime(df_usdtwd.index).tz_localize(None)
+            
+            merged = df_tw.copy()
+            merged.rename(columns={
+                "open": "tw_open",
+                "high": "tw_high",
+                "low": "tw_low",
+                "close": "tw_close",
+                "volume": "tw_volume"
+            }, inplace=True)
+            
+            merged['sox_close_prev'] = df_sox['close'].shift(1).reindex(merged.index, method='ffill')
+            merged['sox_ret_1d'] = df_sox['close'].pct_change(fill_method=None).shift(1).reindex(merged.index, method='ffill')
+            
+            merged['nasdaq_close_prev'] = df_nasdaq['close'].shift(1).reindex(merged.index, method='ffill')
+            merged['nasdaq_ret_1d'] = df_nasdaq['close'].pct_change(fill_method=None).shift(1).reindex(merged.index, method='ffill')
+            
+            merged['usdtwd_close'] = df_usdtwd['close'].reindex(merged.index, method='ffill')
+            merged['usdtwd_ret_5d'] = df_usdtwd['close'].pct_change(5, fill_method=None).reindex(merged.index, method='ffill')
+            
+            merged.dropna(inplace=True)
+            
+            live_q = get_realtime_taifex_futures_price()
+            if live_q:
+                merged.iloc[-1, merged.columns.get_loc('tw_close')] = live_q['price']
+                
+            merged.to_csv(data_path)
+            return merged
+        except Exception:
+            pass
+            
+    # Fallback to local csv
+    if os.path.exists(data_path):
+        df = pd.read_csv(data_path, index_col=0)
+        df.index = pd.to_datetime(df.index)
+        live_q = get_realtime_taifex_futures_price()
+        if live_q:
+            df.iloc[-1, df.columns.get_loc('tw_close')] = live_q['price']
+        return df
         
-    merged.to_csv(data_path)
-    return merged
+    raise RuntimeError("No market data available.")
 
 def get_taiwan_macro_data(data_path="data/taiwan_macro_data.csv", force_reload=False):
     """

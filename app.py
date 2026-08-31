@@ -3,10 +3,12 @@ import sys
 import json
 import time
 
-# Ensure project root is in sys.path for Streamlit Cloud (Linux / mount path)
+# Ensure project root & src directory are in sys.path for Streamlit Cloud
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
+SRC_DIR = os.path.join(ROOT_DIR, "src")
+for p in [ROOT_DIR, SRC_DIR]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
 import pandas as pd
 import numpy as np
@@ -14,11 +16,18 @@ import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime
 
-from src.taiwan_data_loader import get_taiwan_macro_data, get_realtime_taifex_futures_price
-from src.taiwan_macro_strategy import TaiwanCompoundUltraSwingStrategy
-from src.taiwan_backtester import TaiwanFuturesBacktester
-from src.recommendation_engine import TaiwanFuturesRecommendationEngine
-from src.utils import get_local_ip, send_bark_push, send_line_messaging_api, send_discord_webhook
+try:
+    from src.taiwan_data_loader import get_taiwan_macro_data, get_realtime_taifex_futures_price
+    from src.taiwan_macro_strategy import TaiwanCompoundUltraSwingStrategy
+    from src.taiwan_backtester import TaiwanFuturesBacktester
+    from src.recommendation_engine import TaiwanFuturesRecommendationEngine
+    from src.utils import get_local_ip, send_bark_push, send_line_messaging_api, send_discord_webhook
+except (ImportError, ModuleNotFoundError):
+    from taiwan_data_loader import get_taiwan_macro_data, get_realtime_taifex_futures_price
+    from taiwan_macro_strategy import TaiwanCompoundUltraSwingStrategy
+    from taiwan_backtester import TaiwanFuturesBacktester
+    from recommendation_engine import TaiwanFuturesRecommendationEngine
+    from utils import get_local_ip, send_bark_push, send_line_messaging_api, send_discord_webhook
 
 # -------------------------------------------------------------
 # Streamlit Page Config & Minimalist Dark Styling
