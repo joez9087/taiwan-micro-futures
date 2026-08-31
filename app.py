@@ -1,6 +1,13 @@
 import os
+import sys
 import json
 import time
+
+# Ensure project root is in sys.path for Streamlit Cloud (Linux / mount path)
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
