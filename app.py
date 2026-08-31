@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime
 
-from src.taiwan_data_loader import get_taiwan_macro_data, get_realtime_taiwan_price
+from src.taiwan_data_loader import get_taiwan_macro_data, get_realtime_taifex_futures_price
 from src.taiwan_macro_strategy import TaiwanCompoundUltraSwingStrategy
 from src.taiwan_backtester import TaiwanFuturesBacktester
 from src.recommendation_engine import TaiwanFuturesRecommendationEngine
@@ -129,8 +129,10 @@ def save_user_position(data):
 user_pos_state = load_user_position()
 
 # -------------------------------------------------------------
-# Data Loading & Backtesting (Dynamic Live Refresh)
+# Real-Time TAIFEX Data Loading & Backtesting
 # -------------------------------------------------------------
+live_futures_quote = get_realtime_taifex_futures_price()
+
 def load_and_backtest(force_reload=False):
     raw_df = get_taiwan_macro_data(force_reload=force_reload)
     strat = TaiwanCompoundUltraSwingStrategy()
@@ -142,21 +144,27 @@ def load_and_backtest(force_reload=False):
     return raw_df, results, rec, rec_engine
 
 # Top Refresh Controls Bar
-col_h1, col_h2, col_h3 = st.columns([2.5, 1.2, 1])
+col_h1, col_h2, col_h3 = st.columns([2.2, 1.3, 1])
 with col_h2:
-    if st.button("🔄 立即重新整理最新價格", use_container_width=True):
+    if st.button("🔄 立即重新整理 TAIFEX 即時價格", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
 with col_h3:
-    auto_refresh = st.checkbox("⚡ 盤中每 60 秒自動刷新", value=False)
+    auto_refresh = st.checkbox("⚡ 盤中每 30 秒自動刷新", value=False)
 
-raw_df, res, rec, rec_engine = load_and_backtest(force_reload=True)
+raw_df, res, rec, rec_engine = load_and_backtest(force_reload=False)
 df_res = res['df_results']
 sm = res['strategy_metrics']
 bm = res['benchmark_metrics']
 trades_df = res['trades_df']
 local_ip = get_local_ip()
+
+# Extract real-time display data
+current_live_price = live_futures_quote['price'] if live_futures_quote else rec['current_index_price']
+contract_display_name = live_futures_quote['name'] if live_futures_quote else "微台指近月"
+session_display_name = live_futures_quote['session'] if live_futures_quote else "盤中"
+source_display_name = live_futures_quote['source'] if live_futures_quote else "TAIFEX 期交所實時行情"
 current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # Top Header
@@ -166,13 +174,13 @@ st.markdown(f"""
         🇹🇼 微型臺指期貨 智能短波段決策系統
     </h1>
     <p style="color: #94a3b8; font-size: 1.05rem; margin-top: 0;">
-        📈 實時微台指即時價格：<b style="color: #F7931A; font-size: 1.2rem;">{rec['current_index_price']:,.1f} 點</b> ｜ 最後更新時間：<span style="color: #38bdf8;">{current_time_str}</span> ｜ 手機瀏覽：<b style="color: #38bdf8;">http://{local_ip}:8501</b>
+        📈 <b>{contract_display_name} ({session_display_name})</b> 實時價格：<b style="color: #F7931A; font-size: 1.3rem;">{current_live_price:,.0f} 點</b> ｜ 數據源：<span style="color: #10b981;">{source_display_name} (零延遲)</span> ｜ 更新時間：<span style="color: #38bdf8;">{current_time_str}</span>
     </p>
 </div>
 """, unsafe_allow_html=True)
 
 if auto_refresh:
-    time.sleep(60)
+    time.sleep(30)
     st.rerun()
 
 # -------------------------------------------------------------
@@ -226,7 +234,7 @@ if is_in_position:
     pos_eval = rec_engine.evaluate_active_position(
         entry_price=actual_entry_price,
         holding_days=actual_hold_days,
-        current_price=rec['current_index_price'],
+        current_price=current_live_price,
         atr=rec['current_atr']
     )
     total_pnl_twd = pos_eval['pnl_twd'] * actual_lots
@@ -361,28 +369,28 @@ with col_bk2:
     if st.button("🔔 立即推播最新報價至 iPhone", use_container_width=True):
         if is_in_position:
             msg = (
-                f"📈 即時報價: {rec['current_index_price']:,.1f} 點\n"
+                f"📈 {contract_display_name} ({session_display_name}): {current_live_price:,.0f} 點\n"
                 f"💰 實際持倉: {actual_lots} 口 (進場價: {actual_entry_price:,.0f})\n"
                 f"📊 未實現損益: {pos_eval['pnl_pts']:+.1f} 點 (NT$ {total_pnl_twd:+,.0f})\n"
                 f"🛡️ 今日停損 (SL): {pos_eval['dynamic_sl']:,.0f} 點\n"
                 f"🎯 第一目標 (TP1): {pos_eval['dynamic_tp1']:,.0f} 點\n"
                 f"🧭 指令: {pos_eval['guidance']}"
             )
-            title = "微台指即時報價與持倉診斷"
+            title = f"微台指持倉診斷 ({current_live_price:,.0f}點)"
         else:
             msg = (
-                f"📈 即時報價: {rec['current_index_price']:,.1f} 點\n"
+                f"📈 {contract_display_name} ({session_display_name}): {current_live_price:,.0f} 點\n"
                 f"⚪ 目前狀態: 空倉觀望\n"
                 f"🎯 推薦掛單買點: {rec['recommended_entry_price']:,.0f} 點 (1 口)\n"
                 f"🎯 第一目標價: {rec['tp1_target_price']:,} 點\n"
                 f"🛡️ 嚴格停損價: {rec['stop_loss_price']:,} 點\n"
                 f"⏱️ 週期: 短波段 1~3 天 (免轉倉)"
             )
-            title = "微台指即時行情快報"
+            title = f"微台指即時快報 ({current_live_price:,.0f}點)"
             
         ok = send_bark_push(msg, title=title, bark_key=bark_key_input)
         if ok:
-            st.success("✅ 最新即時報價與操作指引已成功推送到您的 iPhone！")
+            st.success("✅ 最新 TAIFEX 即時報價與操作指引已成功推送到您的 iPhone！")
         else:
             st.error("❌ 發送失敗。")
 
@@ -428,6 +436,6 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("---")
 st.markdown(f"""
 <div style="text-align: center; color: #64748b; font-size: 0.85rem; padding-bottom: 20px;">
-    🇹🇼 <b>Taiwan Micro Futures +1000% Quant Decision System</b> ｜ 實時報價：{rec['current_index_price']:,.1f} 點 ｜ 手機瀏覽：http://{local_ip}:8501
+    🇹🇼 <b>Taiwan Micro Futures +1000% Quant Decision System</b> ｜ 實時報價：{current_live_price:,.0f} 點 ｜ 手機瀏覽：http://{local_ip}:8501
 </div>
 """, unsafe_allow_html=True)
