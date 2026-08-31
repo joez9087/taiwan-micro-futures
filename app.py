@@ -1,12 +1,13 @@
 import os
 import json
+import time
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime
 
-from src.taiwan_data_loader import get_taiwan_macro_data
+from src.taiwan_data_loader import get_taiwan_macro_data, get_realtime_taiwan_price
 from src.taiwan_macro_strategy import TaiwanCompoundUltraSwingStrategy
 from src.taiwan_backtester import TaiwanFuturesBacktester
 from src.recommendation_engine import TaiwanFuturesRecommendationEngine
@@ -31,7 +32,7 @@ st.markdown("""
     }
     .main-header {
         text-align: center;
-        padding: 16px 0 8px 0;
+        padding: 12px 0 6px 0;
     }
     .hero-card {
         background: linear-gradient(145deg, #131b2e 0%, #0d1322 100%);
@@ -128,11 +129,10 @@ def save_user_position(data):
 user_pos_state = load_user_position()
 
 # -------------------------------------------------------------
-# Data Loading & Backtesting
+# Data Loading & Backtesting (Dynamic Live Refresh)
 # -------------------------------------------------------------
-@st.cache_data(ttl=1800)
-def load_and_backtest():
-    raw_df = get_taiwan_macro_data()
+def load_and_backtest(force_reload=False):
+    raw_df = get_taiwan_macro_data(force_reload=force_reload)
     strat = TaiwanCompoundUltraSwingStrategy()
     sig_df = strat.generate_signals(raw_df)
     backtester = TaiwanFuturesBacktester(initial_capital=200000.0)
@@ -141,12 +141,23 @@ def load_and_backtest():
     rec = rec_engine.generate_daily_recommendation(raw_df)
     return raw_df, results, rec, rec_engine
 
-raw_df, res, rec, rec_engine = load_and_backtest()
+# Top Refresh Controls Bar
+col_h1, col_h2, col_h3 = st.columns([2.5, 1.2, 1])
+with col_h2:
+    if st.button("🔄 立即重新整理最新價格", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
+
+with col_h3:
+    auto_refresh = st.checkbox("⚡ 盤中每 60 秒自動刷新", value=False)
+
+raw_df, res, rec, rec_engine = load_and_backtest(force_reload=True)
 df_res = res['df_results']
 sm = res['strategy_metrics']
 bm = res['benchmark_metrics']
 trades_df = res['trades_df']
 local_ip = get_local_ip()
+current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # Top Header
 st.markdown(f"""
@@ -154,11 +165,15 @@ st.markdown(f"""
     <h1 style="color: #f8fafc; font-size: 2.2rem; font-weight: 800; margin-bottom: 4px;">
         🇹🇼 微型臺指期貨 智能短波段決策系統
     </h1>
-    <p style="color: #94a3b8; font-size: 1.02rem; margin-top: 0;">
-        實時微台指近月收盤：<b style="color: #F7931A;">45,896 點</b> ｜ 策略累積總報酬：<b style="color: #10B981;">+{sm['Total Return (%)']:.1f}%</b> (超越大盤 +{bm['Total Return (%)']:.1f}%) ｜ 手機瀏覽：<b style="color: #38bdf8;">http://{local_ip}:8501</b>
+    <p style="color: #94a3b8; font-size: 1.05rem; margin-top: 0;">
+        📈 實時微台指即時價格：<b style="color: #F7931A; font-size: 1.2rem;">{rec['current_index_price']:,.1f} 點</b> ｜ 最後更新時間：<span style="color: #38bdf8;">{current_time_str}</span> ｜ 手機瀏覽：<b style="color: #38bdf8;">http://{local_ip}:8501</b>
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+if auto_refresh:
+    time.sleep(60)
+    st.rerun()
 
 # -------------------------------------------------------------
 # SECTION 1: 📋 我的實際持倉狀態回報 ＆ 即時策略推薦 (User Reporting Hub)
@@ -208,7 +223,6 @@ save_user_position({
 
 # Dynamic Action Recommendation based on User's State
 if is_in_position:
-    # Evaluate Active Position
     pos_eval = rec_engine.evaluate_active_position(
         entry_price=actual_entry_price,
         holding_days=actual_hold_days,
@@ -233,7 +247,6 @@ if is_in_position:
     with m_p4:
         st.metric("持倉週期進度", f"第 {pos_eval['holding_days']} 天", "短波段建議 2~5 天結算")
 
-    # Detailed Strategy Directive for Active Position
     st.markdown(f"""
     <div class="action-guidance-box">
         <div style="font-size: 1.1rem; font-weight: bold; color: #a5b4fc; margin-bottom: 6px;">
@@ -248,7 +261,6 @@ if is_in_position:
     </div>
     """, unsafe_allow_html=True)
 else:
-    # Guidance for Cash/Waiting State
     st.markdown(f"""
     <div class="action-guidance-box">
         <div style="font-size: 1.1rem; font-weight: bold; color: #34d399; margin-bottom: 6px;">
@@ -335,7 +347,7 @@ st.markdown("""
         📲 手機 iPhone Bark 即時推播 (已綁定 Key: 55QijE...)
     </div>
     <div style="color: #cbd5e1; font-size: 0.92rem; line-height: 1.6;">
-        點擊下方按鈕，系統會立即將您目前的<b>實際持倉狀態與今日操作指引</b>推送到您的 iPhone Bark App！
+        點擊下方按鈕，系統會立即將您目前的<b>最新即時報價、持倉狀態與操作指引</b>推送到您的 iPhone Bark App！
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -346,31 +358,31 @@ with col_bk1:
 with col_bk2:
     st.write("")
     st.write("")
-    if st.button("🔔 推送最新持倉指引至 iPhone", use_container_width=True):
+    if st.button("🔔 立即推播最新報價至 iPhone", use_container_width=True):
         if is_in_position:
             msg = (
-                f"📈 即時報價: {rec['current_index_price']:,.0f} 點\n"
+                f"📈 即時報價: {rec['current_index_price']:,.1f} 點\n"
                 f"💰 實際持倉: {actual_lots} 口 (進場價: {actual_entry_price:,.0f})\n"
                 f"📊 未實現損益: {pos_eval['pnl_pts']:+.1f} 點 (NT$ {total_pnl_twd:+,.0f})\n"
                 f"🛡️ 今日停損 (SL): {pos_eval['dynamic_sl']:,.0f} 點\n"
                 f"🎯 第一目標 (TP1): {pos_eval['dynamic_tp1']:,.0f} 點\n"
                 f"🧭 指令: {pos_eval['guidance']}"
             )
-            title = "微台指持倉最新診斷"
+            title = "微台指即時報價與持倉診斷"
         else:
             msg = (
-                f"📈 即時報價: {rec['current_index_price']:,.0f} 點\n"
+                f"📈 即時報價: {rec['current_index_price']:,.1f} 點\n"
                 f"⚪ 目前狀態: 空倉觀望\n"
                 f"🎯 推薦掛單買點: {rec['recommended_entry_price']:,.0f} 點 (1 口)\n"
                 f"🎯 第一目標價: {rec['tp1_target_price']:,} 點\n"
                 f"🛡️ 嚴格停損價: {rec['stop_loss_price']:,} 點\n"
                 f"⏱️ 週期: 短波段 1~3 天 (免轉倉)"
             )
-            title = "微台指空倉掛單指引"
+            title = "微台指即時行情快報"
             
         ok = send_bark_push(msg, title=title, bark_key=bark_key_input)
         if ok:
-            st.success("✅ 最新持倉診斷與操作指引已成功推送到您的 iPhone！")
+            st.success("✅ 最新即時報價與操作指引已成功推送到您的 iPhone！")
         else:
             st.error("❌ 發送失敗。")
 
@@ -416,6 +428,6 @@ st.plotly_chart(fig, use_container_width=True)
 st.markdown("---")
 st.markdown(f"""
 <div style="text-align: center; color: #64748b; font-size: 0.85rem; padding-bottom: 20px;">
-    🇹🇼 <b>Taiwan Micro Futures +1000% Quant Decision System</b> ｜ 手機瀏覽：http://{local_ip}:8501
+    🇹🇼 <b>Taiwan Micro Futures +1000% Quant Decision System</b> ｜ 實時報價：{rec['current_index_price']:,.1f} 點 ｜ 手機瀏覽：http://{local_ip}:8501
 </div>
 """, unsafe_allow_html=True)

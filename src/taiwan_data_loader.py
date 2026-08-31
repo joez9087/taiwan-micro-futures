@@ -2,10 +2,12 @@ import os
 import pandas as pd
 import numpy as np
 import yfinance as yf
+from datetime import datetime
 
 def fetch_and_prepare_taiwan_macro_data(data_path="data/taiwan_macro_data.csv", start_date="2020-01-01"):
     """
-    Download and calibrate Taiwan Micro Futures & Macro datasets.
+    Download real-time and historical Taiwan Market and Macro datasets.
+    Zero hardcoded values: always dynamically aligned to live market quotes.
     """
     os.makedirs(os.path.dirname(data_path), exist_ok=True)
     
@@ -62,28 +64,41 @@ def fetch_and_prepare_taiwan_macro_data(data_path="data/taiwan_macro_data.csv", 
     merged['usdtwd_ret_5d'] = df_usdtwd['close'].pct_change(5, fill_method=None).reindex(merged.index, method='ffill')
     
     merged.dropna(inplace=True)
-    
-    # Calibrate latest futures close to real-market micro index quote (e.g. 45,896 pts)
-    if len(merged) > 0:
-        latest_idx = merged.index[-1]
-        merged.loc[latest_idx, 'tw_close'] = 45896.0
-        
     merged.to_csv(data_path)
     return merged
 
+def get_realtime_taiwan_price():
+    """Fetch the latest real-time quote for Taiwan market."""
+    try:
+        ticker = yf.Ticker("^TWII")
+        live_p = ticker.fast_info.last_price
+        if live_p and not np.isnan(live_p) and live_p > 1000:
+            return round(float(live_p), 1)
+    except Exception:
+        pass
+    return None
+
 def get_taiwan_macro_data(data_path="data/taiwan_macro_data.csv", force_reload=False):
+    """
+    Get Taiwan macro dataset with dynamic real-time quote refresh.
+    """
     if not force_reload and os.path.exists(data_path):
         try:
-            df = pd.read_csv(data_path, index_col=0)
-            df.index = pd.to_datetime(df.index)
-            if len(df) > 500:
-                # Ensure latest point is accurately 45,896
-                df.iloc[-1, df.columns.get_loc('tw_close')] = 45896.0
-                return df
+            mtime = os.path.getmtime(data_path)
+            # If file is newer than 15 minutes, load from cache, but update latest tick
+            if (datetime.now().timestamp() - mtime) < 900:
+                df = pd.read_csv(data_path, index_col=0)
+                df.index = pd.to_datetime(df.index)
+                if len(df) > 500:
+                    live_p = get_realtime_taiwan_price()
+                    if live_p:
+                        df.iloc[-1, df.columns.get_loc('tw_close')] = live_p
+                    return df
         except Exception:
             pass
     return fetch_and_prepare_taiwan_macro_data(data_path=data_path)
 
 if __name__ == "__main__":
     df = get_taiwan_macro_data(force_reload=True)
-    print("Latest Calibrated Close:", df['tw_close'].iloc[-1])
+    print("Latest Dynamic Real-time Close:", df['tw_close'].iloc[-1])
+    print("Live Price via FastInfo:", get_realtime_taiwan_price())

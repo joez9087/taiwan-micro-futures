@@ -2,11 +2,11 @@ name: Taiwan Micro Futures Hourly Cloud Alert
 
 on:
   schedule:
-    # 1. Runs every hour from 08:00 to 22:00 Taiwan Time (00:00 to 14:00 UTC, Mon-Fri)
-    - cron: '0 0-14 * * 1-5'
-    # 2. Key Pre-Market Alert at 08:30 Taiwan Time (00:30 UTC, right before 08:45 open)
+    # Runs every hour 24/7 Monday to Friday (covers full day & night sessions)
+    - cron: '0 * * * 1-5'
+    # Additional pre-market alert at 08:30 Taiwan Time (00:30 UTC)
     - cron: '30 0 * * 1-5'
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch: # Allows manual trigger anytime from GitHub Web UI
 
 jobs:
   run-hourly-alert:
